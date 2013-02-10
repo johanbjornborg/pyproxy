@@ -1,4 +1,4 @@
-import socket, sys, re, threading, logging
+import socket, sys, re, threading, logging, logging.config
 from functools import partial
 from urlparse import urlparse
 
@@ -11,79 +11,96 @@ header_fields = ['Accept', 'Accept-Charset', 'Accept-Encoding', 'Accept-Language
 'Max-Forwards', 'Pragma', 'Proxy-Authorization', 'Range', 'Referer', 'TE', 'Upgrade', 'User-Agent', 'Via', 'Warning']    
   
 def main():
-   
+    """
+    Main method. Evaluates command-line arguments, and sets up a TCP socket for the server.
+    """
+    
+    # arg handling
     if len(sys.argv) <= 1:
         print 'Usage : "python pyproxy.py <server_port>"\n[server_port : It is the desired port for the Proxy Server]'
         sys.exit(2)
+    elif len(sys.argv) == 3:
+        # Turn logging to specified value.
+        if 0 <= int(sys.argv[2]) <= 5:
+            logging.basicConfig(level=int(sys.argv[2]) * 10)
+        else:
+            print "INVALID LOGGING PARAMETER\nLogging will display CRITICAL level messages only."
+            logging.basicConfig(level=50)
+    else:
+        # No parameter for logging, turn it to CRITICAL level.
+        logging.basicConfig(level=50)
+        
+    # '' denotes localhost.
     host = ''
     port = sys.argv[1]
-        
+    
     # Create a TCP socket connection, bind it to the specified port.
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.bind((host, int(port)))
     server_socket.listen(5)
-    
-    print "Ready to serve..."
+    logging.info("Ready to serve...")
     
     #Start serving requests...
     while True:
-
         client_socket, client_address = server_socket.accept()
-#        print 'Received connection request from: ', client_address
-
-        t = threading.Thread(target=partial(client_thread, client_socket))
+        logging.info('Received connection request from: ' + str(client_address))
+        t = threading.Thread(target=partial(client_thread, client_socket, client_address))
         t.start()
-        
+       
 
-def client_thread(cli_socket):
+def client_thread(cli_socket, cli_address):
     """
     Takes a client socket and retrieves a webpage from the internet on the client's behalf.
     Requests from client must come in the form of a valid URI.
     @param cli_socket: Incoming client socket (host,port)
     @see: build_uri(request) for more information on URI formatting.
-    
-    
     """
     _message = cli_socket.recv(1024)
-
     request = request_parser(_message)
     if 'error' not in request:
         cached_url = request['host'] + request['url']
         if cached_url in cache:
-            print "Found %s in cache" % cached_url
+            logging.info("Found " + str(cached_url) + " in cache.")
             cli_socket.sendall(cache[cached_url])
 
         else:
-            # Request is valid and not cached. Perform appropriate action.
-            s = build_uri(request)
-            outbound = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            print request['host']
-            outbound.connect((request['host'], 80))
-            outbound.send(s)
-            total_data = []
-            while True:
-                try:
-                    data = outbound.recv(8192)
-                    if not data:
+            try:
+                # Request is valid and not cached. Open a connection and retrieve the web page.
+                s = build_uri(request)
+                outbound = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                logging.info("Client %s requested host %s" % (cli_address, request['host']))
+                outbound.connect((request['host'], 80))
+                outbound.send(s)
+                
+                total_data = []
+                while True:
+                    # Receive loop, grabs everything from the remote website and appends it into a list.
+                    try:
+                        data = outbound.recv(8192)
+                        if not data:
+                            break
+                        total_data.append(data)
+                    except socket.timeout, e:
+                        logging.error(str(e))
                         break
-                    total_data.append(data)
-                except socket.timeout:
-                    break
+                
+                #Send result to originating client
+                data = ''.join(total_data)
+                cli_socket.sendall(data)
             
-            #Send result to originating client
-            data = ''.join(total_data)
-            cli_socket.sendall(data)
-        
-            #Cache the results
-            cache[cached_url] = data
-            
-            #Close server socket
-            outbound.close()
-        
+                #Cache the results
+                cache[cached_url] = data
+                
+                #Close server socket
+                outbound.close()
+            except Exception, e:
+                logging.ERROR(str(e))
+                
         # Close the client socket
         cli_socket.close() 
     else:
-        cli_socket.send(request['error'])
+        logging.error("Client %s error: %s" % (str(cli_address), request['error']))
+        cli_socket.send(build_html_error(request['error']))
         return None
 
 
@@ -131,16 +148,16 @@ def request_parser(message):
             return {'error': "Error 501: Not Implemented"}
     else:
         return {'error': "Error 400: Bad Request"}
+   
+def build_html_error(error_message):
+    """
+    
+    """
+    return """<html><head>ERROR</head><body><font size="20"><b>{0}</b></font></body></html>""".format(error_message)
+    
+
+
       
-
-            
-def is_cached(filename):
-    filename = filename.partition("/")[2] 
-    print filename 
-    fileExist = "false"
-    file_to_use = "/" + filename
-    print file_to_use
-
 if __name__ == '__main__':
     main()
  
