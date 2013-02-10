@@ -94,7 +94,8 @@ def client_thread(cli_socket, cli_address):
                 #Close server socket
                 outbound.close()
             except Exception, e:
-                logging.ERROR(str(e))
+                cli_socket.send(build_html_error("Error 400: Bad Request"))
+                logging.error(str(e))
                 
         # Close the client socket
         cli_socket.close() 
@@ -151,9 +152,11 @@ def request_parser(message):
    
 def build_html_error(error_message):
     """
-    
+    Builds a very basic webpage string in the event of an error in between the client and proxy server. 
+    @param error_message: String containing an HTTP error message.
+    @return: Webpage readable string. 
     """
-    return """<html><head>ERROR</head><body><font size="20"><b>{0}</b></font></body></html>""".format(error_message)
+    return """<html><head></head><body><font size="20"><b>{0}</b></font></body></html>""".format(error_message)
     
 
 
